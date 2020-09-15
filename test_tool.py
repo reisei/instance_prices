@@ -1,10 +1,11 @@
 import boto3
 from tabulate import tabulate
+from datetime import datetime, timedelta
 
 # Some hardcode variables
 #
 # Ohio AWS region
-AWS_REGION = 'us-east-1'
+AWS_REGION = 'us-east-2'
 # Number of days to look on spot instances prices
 SPOT_HISTORY_DAYS = 7
 # Instances hardcoded price
@@ -43,13 +44,33 @@ def get_platform_dict(images_ids):
     return {i['ImageId']: i['PlatformDetails'] for i in images['Images']}
 
 
-def get_spot_price():
+def get_spot_prices_data():
+    r_types = i_types()
+    r_platforms = platforms()
+    start_time = datetime.now()
+    end_time = start_time - timedelta(days=SPOT_HISTORY_DAYS)
+    request = client.describe_spot_price_history(
+            InstanceTypes=r_types,
+            ProductDescriptions=r_platforms,
+            EndTime=end_time
+            )
+    return request
+
+
+def get_spot_price(data, i_type, platform, availability_zone):
+    for price in data['SpotPriceHistory']:
+        if price['InstanceType'] == i_type and \
+                platform in price['ProductDescription'] and \
+                price['AvailabilityZone'] == availability_zone:
+            return float(price['SpotPrice'])
     return 0
 
 
 def platforms():
     platforms_unique = set([i['platform'] for i in INSTANCES])
-    return list(platforms_unique)
+    platforms = list(platforms_unique)
+    platforms.extend([i + ' (Amazon VPC)' for i in platforms])
+    return platforms
 
 
 def i_types():
@@ -58,6 +79,7 @@ def i_types():
 
 
 def get_instances():
+    spot_prices_data = get_spot_prices_data()
     data = []
     r_types = i_types()
     filters = [
@@ -76,6 +98,14 @@ def get_instances():
     for instance in instances:
         instance_platform = platform_dict.get(instance.image_id)
         on_demand_price = get_on_demand_price(instance.instance_type, instance_platform)
+        spot_price = get_spot_price(spot_prices_data,
+                                    instance.instance_type,
+                                    instance_platform,
+                                    instance.placement['AvailabilityZone'])
+        if spot_price is not 0:
+            diff_price = on_demand_price - spot_price
+        else:
+            diff_price = 0
         if on_demand_price is not None:
             i_data = [
                     instance.instance_id,
@@ -83,8 +113,8 @@ def get_instances():
                     instance.placement['AvailabilityZone'],
                     instance_platform,
                     on_demand_price,
-                    0,
-                    0
+                    spot_price,
+                    diff_price
                     ]
             data.append(i_data)
     return data
