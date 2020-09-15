@@ -24,21 +24,22 @@ INSTANCES = [
         ]
 
 # client definition
-ec2 = boto3.client('ec2', region_name=AWS_REGION)
+client = boto3.client('ec2', region_name=AWS_REGION)
+
+# resource definition
+ec2 = boto3.resource('ec2', region_name=AWS_REGION)
 
 
 # return price on needed type/platform, else return None
 def get_on_demand_price(i_type, platform):
-    print(i_type, platform)
     for i in INSTANCES:
-        if i.get('i_type') == i_type and i.get('platform') == platform:
+        if i.get('platform') == platform and i.get('i_type') == i_type:
             return i.get('i_price')
-        else:
-            return None
+    return None
 
 
 def get_platform_dict(images_ids):
-    images = ec2.describe_images(ImageIds=images_ids)
+    images = client.describe_images(ImageIds=images_ids)
     return {i['ImageId']: i['PlatformDetails'] for i in images['Images']}
 
 
@@ -69,23 +70,21 @@ def get_instances():
                 'Values': ['running']
             }
             ]
-    instances = ec2.describe_instances(Filters=filters)
-    instances_list = instances['Reservations'][0]
-    image_ids = [i['ImageId'] for i in instances_list['Instances']]
+    instances = ec2.instances.filter(Filters=filters)
+    image_ids = [i.image_id for i in instances]
     platform_dict = get_platform_dict(image_ids)
-    for instance in instances_list['Instances']:
-        instance_platform = platform_dict.get(instance['ImageId'])
-        print(instance_platform)
-        print(instance['InstanceType'])
-        on_demand_price = get_on_demand_price(instance['InstanceType'], instance_platform)
-        print(on_demand_price)
+    for instance in instances:
+        instance_platform = platform_dict.get(instance.image_id)
+        on_demand_price = get_on_demand_price(instance.instance_type, instance_platform)
         if on_demand_price is not None:
             i_data = [
-                    instance['InstanceId'],
-                    instance['InstanceType'],
-                    instance['Placement']['AvailabilityZone'],
+                    instance.instance_id,
+                    instance.instance_type,
+                    instance.placement['AvailabilityZone'],
                     instance_platform,
-                    on_demand_price
+                    on_demand_price,
+                    0,
+                    0
                     ]
             data.append(i_data)
     return data
@@ -102,7 +101,7 @@ def run():
                 'PriceDiff'
             ]
     data = get_instances()
-    return tabulate(data, headers=headers)
+    print(tabulate(data, headers=headers))
 
 
 if __name__ == '__main__':
